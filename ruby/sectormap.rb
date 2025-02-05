@@ -20,27 +20,44 @@ end
 
 labels = []
 
+def survey_index(filename)
+  si = 0
+  File.open(filename, 'r') do |file|
+    file.each_line do |line|
+      if match = line.match(/"surveyIndex": (\d+)/)
+        si = match[1].to_i
+        break
+      end
+    end
+  end
+  si
+end
+
 def add_stars(image, sector_definitions_path, sector_config)
   sector_path = File.join(sector_definitions_path, sector_config['name'])
   x_offset = (26 + sector_config['X']) * PIXEL_SIZE * 32
   y_offset = (-1 - sector_config['Y']) * PIXEL_SIZE * 40
   puts "x #{sector_config['X']} y #{sector_config['Y']} #{sector_config['name']}"
   Dir.foreach(sector_path) do |file_name|
-    next unless file_name.match(/^\d{4}\.txt$/)
+    next unless file_name.match(/^\d{4}\.json$/)
+    solar_path = File.join(sector_path, file_name)
+    si = survey_index(solar_path)
+    if si > 2
+      xx = file_name[0..1].to_i
+      yy = file_name[2..3].to_i
 
-    xx = file_name[0..1].to_i
-    yy = file_name[2..3].to_i
-
-    if xx.between?(1, 32) && yy.between?(1, 40)
-      x_start = (xx - 1) * PIXEL_SIZE + x_offset
-      y_start = (yy - 1) * PIXEL_SIZE + y_offset
-      (0..1).each do |dx|
-        (0..1).each do |dy|
-          image[x_start + dx, y_start + dy] = STAR_COLOUR
+      if xx.between?(1, 32) && yy.between?(1, 40)
+        x_start = (xx - 1) * PIXEL_SIZE + x_offset
+        y_start = (yy - 1) * PIXEL_SIZE + y_offset
+        (0..1).each do |dx|
+          (0..1).each do |dy|
+            image[x_start + dx, y_start + dy] = STAR_COLOUR
+          end
         end
+      else
+        puts "Invalid coordinates in file name: #{file_name}"
       end
-    else
-      puts "Invalid coordinates in file name: #{file_name}"
+
     end
   end
 end
@@ -83,7 +100,7 @@ def generate_sectors_image(sector_definitions_path, sector_output_path, output_p
     next unless file_name.match(/\.yaml$/)
     sector_config = YAML.load_file(File.join(sector_definitions_path, file_name))
 
-    labels << SectorLabel.new(sector_config['X'], sector_config['Y'], sector_config['abbreviation'])
+    labels << SectorLabel.new(sector_config['X'], sector_config['Y'], sector_config['name'])
 
     add_stars(image, sector_output_path, sector_config)
   end
@@ -97,34 +114,53 @@ def generate_sectors_image(sector_definitions_path, sector_output_path, output_p
 end
 
 def add_sector_labels(output_path, labels)
-  rotation = -45
-  point_size = 20
+  rotation = 0
+  # rotation = -45
+  point_size = 18
+  text_height = 20
 
   MiniMagick::Tool::Convert.new do |convert|
     convert.background 'none'
     convert.pointsize point_size.to_s
     convert.fill 'red'
+    convert.font 'C:/windows/fonts/CascadiaCode.ttf'
     labels.each do |label|
       x = (26 + label.x) * PIXEL_SIZE * 32 + 16 * PIXEL_SIZE
       y = (-1 - label.y) * PIXEL_SIZE * 40 + 20 * PIXEL_SIZE
 
-      # Calculate approximate text dimensions
-      text_width = label.name.length * point_size * 0.6 # Approx. width of the text
-      text_height = point_size                         # Approx. height of the text
+      words = label.name.split(' ')
 
-      # Offset to centre text
-      x_offset = -text_width / 2
       y_offset = text_height / 2
+      if words.length == 4
+        y_offset = y_offset * 2
+      elsif words.length == 3
+        y_offset = y_offset + text_height / 2
+      elsif words.length == 2
+        y_offset = text_height
+      end
 
-      # Adjust for rotation
-      rad = Math::PI * rotation / 180.0 # Convert rotation to radians
-      rotated_x_offset = x_offset * Math.cos(rad) - y_offset * Math.sin(rad)
-      rotated_y_offset = x_offset * Math.sin(rad) + y_offset * Math.cos(rad)
+      text_height = point_size                         # Approx. height of the text
+      words.each_with_index do |word, index|
+        # Calculate approximate text dimensions
+        text_width = word.length * point_size * 0.6 # Approx. width of the text
 
-      convert.draw "translate #{x+rotated_x_offset},#{y+rotated_y_offset} rotate #{rotation} text 0,0 '#{label.name}'"
+        # Offset to centre text
+        x_offset = text_width / -2
+        y_offset -= text_height
+
+        # Adjust for rotation
+        # rad = Math::PI * rotation / 180.0 # Convert rotation to radians
+        # rotated_x_offset = x_offset * Math.cos(rad) - y_offset * Math.sin(rad)
+        # rotated_y_offset = x_offset * Math.sin(rad) + y_offset * Math.cos(rad)
+        # rotated_x_offset = x_offset * Math.cos(rad) - y_offset * Math.sin(rad)
+        # rotated_y_offset = x_offset * Math.sin(rad) + y_offset * Math.cos(rad)
+        escaped_word = word.gsub("'", "\\\\'")
+        convert.draw "translate #{x+x_offset},#{y-y_offset} rotate #{rotation} text 0,0 '#{escaped_word}'"
+        # convert.draw "translate #{x+rotated_x_offset},#{y-rotated_y_offset} rotate #{rotation} text 0,0 '#{escaped_word}'"
+      end
     end
     convert << output_path
-    convert << "labels.png"
+    convert << "uncharted-space.png"
   end
 end
 
